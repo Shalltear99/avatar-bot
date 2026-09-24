@@ -1,0 +1,24 @@
+# kredensial — JANGAN pernah commit!
+akun.txt
+*akun*
+credentials*
+
+# log & hasil sniff
+logs/
+*.log
+
+# JAR game (binari besar, hak milik pihak ketiga)
+*.jar
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
