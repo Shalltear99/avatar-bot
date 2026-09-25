@@ -22,3 +22,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# sniff tools — development only, not versioned
+sniff-tools/

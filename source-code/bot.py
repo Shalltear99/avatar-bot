@@ -42,6 +42,11 @@ import json
 from collections import deque
 from datetime import datetime
 from frame_decoder import decode_payload, KNOWN_OPS, format_frame, format_frame_hex
+
+# root project = satu level di atas source-code/
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+AKUN_PATH = os.path.join(PROJECT_ROOT, "source-code", "akun.txt")
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
@@ -853,14 +858,14 @@ class AvatarBot:
             os.makedirs("logs", exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            json_path = f"logs/sniff_{label}_{ts}.json"
+            json_path = f"{LOGS_DIR}/sniff_{label}_{ts}.json"
             with open(json_path, 'w') as f:
                 json.dump({
                     "outbound": getattr(self, "outbound_log", []),
                     "inbound": log_entries,
                 }, f, indent=2, ensure_ascii=False)
             
-            txt_path = f"logs/sniff_{label}_{ts}.txt"
+            txt_path = f"{LOGS_DIR}/sniff_{label}_{ts}.txt"
             with open(txt_path, 'w') as f:
                 f.write(f"# Avatar Smart Fish sniff log — {label}\n")
                 f.write(f"# {datetime.now().isoformat()} — {count} frames\n\n")
@@ -1272,7 +1277,7 @@ def patch_jar_host(input_jar: str, output_jar: str, new_host: str = "127.0.0.1")
 # =====================================================================
 # ENTRY POINT
 # =====================================================================
-def load_accounts(path: str = "akun.txt") -> List[Tuple[str, str, str]]:
+def load_accounts(path: str = AKUN_PATH) -> List[Tuple[str, str, str]]:
     """
     Baca multi-akun. Format fleksibel per baris:
       user:pass              (label = user)
@@ -1507,7 +1512,7 @@ def cmd_info(accounts: List[Tuple[str, str, str]], live_seconds: int = 20):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     for b in bots:
         if b.sniffer:
-            b.sniffer.export_json(f"logs/sniff_session_{b.label}_{ts}.json")
+            b.sniffer.export_json(f"{LOGS_DIR}/sniff_session_{b.label}_{ts}.json")
             b.sniffer.unknown_alert()
             print()
     for b in bots:
@@ -1544,11 +1549,11 @@ def main():
 
     # --- proxy mode: tidak butuh akun ---
     if mode == "proxy":
-        run_proxy_sniff("0.0.0.0", 19126, HOST, PORT, "logs/proxy_sniff.log")
+        run_proxy_sniff("0.0.0.0", 19126, HOST, PORT, os.path.join(LOGS_DIR, "proxy_sniff.log"))
         return
 
     # --- load akun (multi) ---
-    accounts = load_accounts("akun.txt")
+    accounts = load_accounts(AKUN_PATH)
     if not accounts:
         print("[!] Tidak ada akun valid di akun.txt")
         sys.exit(1)
@@ -1632,7 +1637,7 @@ def main():
         if bot.sniffer:
             os.makedirs("logs", exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            bot.sniffer.export_json(f"logs/sniff_session_{label}_{ts}.json")
+            bot.sniffer.export_json(f"{LOGS_DIR}/sniff_session_{label}_{ts}.json")
             bot.sniffer.unknown_alert()
     except KeyboardInterrupt:
         print("\n[!] Dihentikan user")

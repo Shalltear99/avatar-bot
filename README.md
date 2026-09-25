@@ -3,18 +3,30 @@
 Bot + dashboard TUI untuk game J2ME **Avatar Art Gaming** (`avatar-prod.ayomabar.com:19126`).
 Protokol direverse-engineering dari JAR + sniff trafik live.
 
-![version](https://img.shields.io/badge/version-0.0.1-blue)
+![version](https://img.shields.io/badge/version-0.0.2-blue)
 
-## Fitur (v0.0.1)
+## Struktur Folder
+
+```text
+avatar-bot/
+├── source-code/     # kode bot + dashboard + akun.txt (credential, tidak di-commit)
+├── sniff-tools/     # tool sniffing/analisa — TIDAK di-commit (dev only)
+├── logs/            # output log, snapshot, PNG ikan — TIDAK di-commit
+├── PRD.md           # product requirements + roadmap
+├── README.md
+└── .venv/           # virtualenv (tidak di-commit)
+```
+
+## Fitur (v0.0.2)
 
 - **Login + handshake live** terverifikasi (XOR rolling cipher per arah)
 - **Auto-fish** — pindah map → duduk spot → beli umpan → pancing → hasil
 - **Auto-farm** — rawat 40 plot (interleaved op65+op64) → deteksi siap → panen
-- **Multi-akun** — sequential semua akun, filter per akun/label
-- **Sniffer v2** — statistik frame in/out, history, **deteksi opcode tidak dikenal** (future-update alert), export JSON
+- **Multi-akun PARALEL** — semua akun login & auto bersamaan (satu thread per akun)
+- **Statistik per akun** — jumlah mancing, ikan tertangkap, gold (kolom tabel)
+- **Simpan PNG ikan** setiap tangkapan → `logs/fish_catch/`
+- **Sniffer v2** — statistik frame in/out, deteksi opcode tak dikenal, export JSON
 - **Dashboard TUI** (Textual + Rich) — tampilan dashboard saja; log & sniff ke file
-- **Proxy transparan** — sniff aksi dari HP (J2ME Loader)
-- **JAR patcher** — ganti host via constant-pool (aman, class valid)
 
 ## Instalasi
 
@@ -27,54 +39,52 @@ uv pip install --python .venv/bin/python textual rich
 
 ## Menjalankan Dashboard (TUI)
 
-```bash
-.venv/bin/python dashboard.py
+**Windows (PowerShell/cmd):**
+
+```powershell
+.\.venv\Scripts\python.exe source-code\dashboard.py
 ```
 
-Tombol: `f` fish · `m` farm · `a` all (farm+fish) · `p` proxy · `s` snapshot · `x` export JSON · `q` keluar.
+**Linux / macOS / WSL:**
+
+```bash
+.venv/bin/python source-code/dashboard.py
+```
+
+> Jalankan dari root folder `avatar-bot/` — log otomatis masuk `logs/`.
+
+Tombol: `f` fish · `m` farm · `a` all (farm+fish, paralel semua akun) · `p` proxy · `s` snapshot · `x` export JSON · `q` keluar.
 Log & hasil sniff **tidak** ditampilkan di layar — semua masuk `logs/dashboard_*.log`.
 
 ## CLI mode (tanpa TUI)
 
+Jalankan dari root folder (Windows: ganti `python3` → `.\.venv\Scripts\python.exe`):
+
 ```bash
-python3 bot.py login          # tes login
-python3 bot.py fish -c 3      # 3 siklus mancing
-python3 bot.py farm -c 2      # 2 siklus farm
-python3 bot.py all -c 1       # semua akun: farm+fish
-python3 bot.py info -t 20     # panel informasi (CLI sederhana)
-python3 bot.py proxy          # proxy untuk HP
-python3 bot.py patch          # patch JAR → 127.0.0.1
+python3 source-code/bot.py login          # tes login semua akun
+python3 source-code/bot.py fish -c 3      # 3 siklus mancing
+python3 source-code/bot.py farm -c 2      # 2 siklus farm
+python3 source-code/bot.py all -c 1       # semua akun: farm+fish
+python3 source-code/bot.py info -t 20     # panel informasi (CLI sederhana)
+python3 source-code/bot.py proxy          # proxy untuk HP
 ```
 
-## Multi-akun (`akun.txt` — tidak di-commit!)
+## Multi-akun (`source-code/akun.txt` — tidak di-commit!)
 
-```
-# format baru:
-username1:password1
-username2:password2:LabelKustom
+Format:
 
-# format lama:
-id : username3
-password : password3
+```text
+username:password:label
 ```
 
-## Struktur
+Satu baris = satu akun. Semua akun diproses **paralel** oleh dashboard.
 
-```
-bot.py            core: protokol, PacketFactory, Sniffer v2, multi-akun, CLI
-dashboard.py      TUI dashboard (Textual) — v0.0.1
-frame_decoder.py  decoder opcode + payload (60+ opcode)
-akun.txt          kredensial (gitignored)
-logs/             log & export sniff (gitignored)
-```
+## Keamanan
+
+- `akun.txt` di-gitignore — credential tidak pernah masuk repo/log.
+- `sniff-tools/` di-gitignore — tool internal tidak dirilis.
+- Dashboard tidak pernah menampilkan payload/hex/credential.
 
 ## Roadmap
 
-- [ ] v0.1: auto-sell hasil panen (op 74), scheduler
-- [ ] v0.2: panel web (akses dari HP)
-- [ ] v0.3: deteksi event khusus (giftcode, quest)
-
-## Disclaimer
-
-Proyek edukasi reverse-engineering. Gunakan dengan tanggung jawab sendiri —
-bot melanggar ToS game; risiko banned ditanggung pengguna.
+Lihat [PRD.md](PRD.md) — v0.0.3 dashboard bersih, v0.0.4 katalog ikan, dst.

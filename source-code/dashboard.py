@@ -37,10 +37,12 @@ from datetime import datetime
 # =====================================================================
 # SUPPRESS OUTPUT — log/sniff tidak boleh muncul di layar dashboard.
 # =====================================================================
-os.makedirs("logs", exist_ok=True)
-os.makedirs("logs/fish_catch", exist_ok=True)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+os.makedirs(os.path.join(LOGS_DIR, "fish_catch"), exist_ok=True)
 _TS = datetime.now().strftime("%Y%m%d_%H%M%S")
-_LOG_PATH = f"logs/dashboard_{_TS}.log"
+_LOG_PATH = os.path.join(LOGS_DIR, f"dashboard_{_TS}.log")
 _log_file = open(_LOG_PATH, "w", buffering=1, encoding="utf-8")
 
 
@@ -205,7 +207,7 @@ class AccountWorker:
                 return None
             png = payload[idx:]
             fname = f"{self.label}_{int(time.time())}_{self.caught}.png"
-            fpath = os.path.join("logs", "fish_catch", fname)
+            fpath = os.path.join(LOGS_DIR, "fish_catch", fname)
             with open(fpath, "wb") as f:
                 f.write(png)
             return fpath
@@ -463,7 +465,7 @@ class AvatarDash(App):
     def action_snapshot(self) -> None:
         snap = self.bridge.snapshot()
         import json
-        path = f"logs/snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path = os.path.join(LOGS_DIR, f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(path, "w") as f:
             json.dump(snap, f, indent=2, ensure_ascii=False, default=str)
         self._log_evt(f"[blue]Snapshot → {path}[/blue]")
@@ -473,7 +475,7 @@ class AvatarDash(App):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         for w in self.bridge.workers:
             if w.bot.sniffer:
-                w.bot.sniffer.export_json(f"logs/sniff_session_{w.label}_{ts}.json")
+                w.bot.sniffer.export_json(os.path.join(LOGS_DIR, f"sniff_session_{w.label}_{ts}.json"))
                 n += 1
         self._log_evt(f"[blue]Export {n} sesi sniff selesai[/blue]")
 

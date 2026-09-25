@@ -3,6 +3,7 @@ Dokumen kebutuhan produk untuk bot Avatar Art Gaming v2 (J2ME).
 Satu rilis = satu tema. Tidak mencampur banyak fitur besar dalam satu versi.
 
 Status: v0.0.2 sudah rilis (multi-akun paralel + dashboard dasar).
+Restrukturisasi folder sudah dilakukan: source di `source-code/`, tool sniffing di `sniff-tools/` (tidak di-commit), README mencakup cara run Windows & Linux.
 
 ---
 
@@ -11,8 +12,19 @@ Status: v0.0.2 sudah rilis (multi-akun paralel + dashboard dasar).
 2. Fitur yang menyentuh server hanya boleh dibangun setelah opcode & payload terverifikasi lewat sniffer.
 3. Dashboard tidak pernah menampilkan: packet mentah, hex dump, credential, stack trace.
 4. Semua nilai yang belum terverifikasi ditampilkan sebagai `?` atau `belum terverifikasi`, bukan angka tebak-tebakan.
-5. Credential (username/password) hanya hidup di `akun.txt` + memori proses. Tidak pernah masuk repo, log, atau screenshot.
+5. Credential (username/password) hanya hidup di `source-code/akun.txt` + memori proses. Tidak pernah masuk repo, log, atau screenshot.
 6. Setiap versi wajib lulus smoke test live (minimal 1 akun, 5 menit) sebelum di-push.
+
+## Struktur Repo (sejak restrukturisasi)
+```text
+avatar-bot/            # root repo & working dir
+├── source-code/       # bot.py, dashboard.py, frame_decoder.py, akun.txt (ignored)
+├── sniff-tools/       # tool sniffing internal — SELURUH folder ignored
+├── logs/              # output — ignored
+├── PRD.md, README.md, .gitignore
+```
+- Jalankan selalu dari root `avatar-bot/` (Windows: `.\.venv\Scripts\python.exe source-code\dashboard.py`).
+- Path log/akun dihitung dari `PROJECT_ROOT` otomatis — relatif terhadap lokasi file source.
 
 ---
 
