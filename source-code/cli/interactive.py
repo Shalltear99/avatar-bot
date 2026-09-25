@@ -32,6 +32,10 @@ CUSTOM_STYLE = Style([
     ('instruction', 'fg:#888'),
 ])
 
+# ---- Config state global (dipakai run_interactive + config_menu) ----
+CURRENT_ZONE = 4
+ACCOUNTS_FILE = "akun.txt"
+
 
 def resolve_accounts(path: str) -> str:
     """Resolve path file akun relatif terhadap source-code/."""
@@ -44,13 +48,12 @@ def resolve_accounts(path: str) -> str:
 
 def run_interactive():
     """Loop menu interaktif."""
-    accounts_file = "akun.txt"
-    current_zone = 4
+    global CURRENT_ZONE, ACCOUNTS_FILE
     
     while True:
         console.clear()
         console.print("[bold cyan]🎣 AVATAR BOT v0.1.0[/bold cyan]")
-        console.print(f"[dim]Server: {HOST}:{PORT} | Zone: {current_zone}[/dim]\n")
+        console.print(f"[dim]Server: {HOST}:{PORT} | Zone: {CURRENT_ZONE}[/dim]\n")
         
         action = questionary.select(
             "Pilih aksi:",
@@ -71,20 +74,24 @@ def run_interactive():
             break
             
         elif action.startswith("🎣"):
-            accs = load_accounts(resolve_accounts(accounts_file))
-            run_multi_account(accs, "fish", zone=current_zone)
+            accs = load_accounts(resolve_accounts(ACCOUNTS_FILE))
+            run_multi_account(accs, "fish", zone=CURRENT_ZONE)
+            _wait_after_action()
             
         elif action.startswith("🌾"):
-            accs = load_accounts(resolve_accounts(accounts_file))
-            run_multi_account(accs, "farm", zone=current_zone)
+            accs = load_accounts(resolve_accounts(ACCOUNTS_FILE))
+            run_multi_account(accs, "farm", zone=CURRENT_ZONE)
+            _wait_after_action()
             
         elif action.startswith("⚡"):
-            accs = load_accounts(resolve_accounts(accounts_file))
-            run_multi_account(accs, "all", zone=current_zone)
+            accs = load_accounts(resolve_accounts(ACCOUNTS_FILE))
+            run_multi_account(accs, "all", zone=CURRENT_ZONE)
+            _wait_after_action()
             
         elif action.startswith("📊"):
-            accs = load_accounts(resolve_accounts(accounts_file))
+            accs = load_accounts(resolve_accounts(ACCOUNTS_FILE))
             cmd_info(accs, live_seconds=30)
+            _wait_after_action()
             
         elif action.startswith("🔧"):
             config_menu()
@@ -94,12 +101,12 @@ def run_interactive():
 
 def config_menu():
     """Sub-menu konfigurasi."""
-    global current_zone
+    global CURRENT_ZONE, ACCOUNTS_FILE
     while True:
         choice = questionary.select(
             "Konfigurasi:",
             choices=[
-                f"🌊 Set Zone (current: {current_zone})",
+                f"🌊 Set Zone (current: {CURRENT_ZONE})",
                 "📁 Set Accounts File",
                 "⬅️ Back",
             ],
@@ -111,17 +118,17 @@ def config_menu():
         elif choice.startswith("🌊"):
             zone_str = questionary.text(
                 "Zona mancing (1-39):",
-                default=str(current_zone),
+                default=str(CURRENT_ZONE),
                 validate=lambda x: x.isdigit() and 1 <= int(x) <= 39,
             ).ask()
             if zone_str:
-                current_zone = int(zone_str)
-                console.print(f"[green]Zone set to {current_zone}[/green]")
+                CURRENT_ZONE = int(zone_str)
+                console.print(f"[green]Zone set to {CURRENT_ZONE}[/green]")
         elif choice.startswith("📁"):
-            fname = questionary.text("Accounts file:", default="akun.txt").ask()
+            fname = questionary.text("Accounts file:", default=ACCOUNTS_FILE).ask()
             if fname:
-                accounts_file = fname
-                console.print(f"[green]Accounts file: {accounts_file}[/green]")
+                ACCOUNTS_FILE = fname
+                console.print(f"[green]Accounts file: {ACCOUNTS_FILE}[/green]")
 
 def view_logs():
     """Lihat file log terbaru."""
@@ -140,6 +147,14 @@ def view_logs():
         log_path = log_dir / choice
         console.print(f"[dim]--- {choice} ---[/dim]")
         console.print(log_path.read_text(errors='replace')[-2000:])
+
+def _wait_after_action():
+    """Pause setelah aksi selesai agar user bisa baca output (Windows: tidak langsung keluar)."""
+    try:
+        from questionary import text as _q_text
+        _q_text("\n[Enter] untuk kembali ke menu...").ask()
+    except Exception:
+        input("\n[Enter] untuk kembali ke menu...")
 
 if __name__ == "__main__":
     run_interactive()

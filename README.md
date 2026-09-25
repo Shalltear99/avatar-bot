@@ -64,10 +64,12 @@ Menu:
 🌾 Start Farming
 ⚡ Start All (Fish + Farm)
 📊 Live Statistics
-🔧 Configuration
+🔧 Configuration  ← set zona 1–39, ganti file akun
 📜 View Logs
 ❌ Exit
 ```
+
+> **Catatan Windows:** Setelah aksi selesai, tekan **Enter** untuk kembali ke menu (jendela tidak langsung tutup).
 
 ### Mode Command (langsung)
 
