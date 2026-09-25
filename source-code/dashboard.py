@@ -60,6 +60,33 @@ class _Tee:
         return False
 
 
+# Import dependency DULU dengan error yang TERLIHAT di layar.
+# (Sebelumnya import gagal = traceback masuk file log diam-diam → user lihat
+#  program "keluar sendiri" tanpa pesan. Itu yang bikin "gabisa dibuka".)
+try:
+    from textual.app import App, ComposeResult  # noqa: E402
+    from textual.containers import Horizontal, Vertical  # noqa: E402
+    from textual.widgets import (  # noqa: E402
+        Header,
+        Footer,
+        DataTable,
+        Static,
+        Button,
+        Input,
+    )
+    from textual.binding import Binding  # noqa: E402
+except ImportError as e:
+    print("=" * 60)
+    print("DEPENDENSI BELUM TERINSTALL!")
+    print(f"  {e}")
+    print()
+    print("Jalankan salah satu dari folder avatar-bot:")
+    print("  Windows : .\\.venv\\Scripts\\python.exe -m pip install textual rich")
+    print("  Linux   : .venv/bin/python -m pip install textual rich")
+    print("=" * 60)
+    input("Tekan ENTER untuk keluar...")
+    sys.exit(1)
+
 sys.stdout = _Tee(_log_file)
 sys.stderr = _Tee(_log_file)
 
@@ -70,18 +97,6 @@ from bot import (  # noqa: E402
     HOST,
     PORT,
 )
-
-from textual.app import App, ComposeResult  # noqa: E402
-from textual.containers import Horizontal, Vertical  # noqa: E402
-from textual.widgets import (  # noqa: E402
-    Header,
-    Footer,
-    DataTable,
-    Static,
-    Button,
-    Input,
-)
-from textual.binding import Binding  # noqa: E402
 
 VERSION = "0.0.3"
 MAX_ALERTS = 5
@@ -555,7 +570,15 @@ class AvatarDash(App):
 
 
 def main():
-    AvatarDash().run()
+    try:
+        AvatarDash().run()
+    except Exception:
+        # Kembalikan stdout asli supaya traceback TERLIHAT di layar
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
+        traceback.print_exc()
+        print()
+        input("Terjadi error. Tekan ENTER untuk keluar...")
 
 
 if __name__ == "__main__":
