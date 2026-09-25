@@ -89,15 +89,19 @@ MAX_ALERTS = 5
 # DAFTAR ZONA MANCING — area ID dari sniff live (op 50 move_map).
 # Tambahkan zona baru di sini setelah di-sniff dari HP.
 # =====================================================================
-FISHING_ZONES = {
-    "default":  {"area": 16, "sub": 4,   "spot": (284, 141),
-                 "desc": "Area mancing default (dari sniff v2)"},
-    "farm25":   {"area": 25, "sub": 0,   "spot": (284, 141),
-                 "desc": "Kebun/farm area 25 (spot sama, perlu verifikasi)"},
-    "kota13":   {"area": 13, "sub": 255, "spot": (284, 141),
-                 "desc": "Kota (area 13, sub=255 main map)"},
-}
-DEFAULT_ZONE = "default"
+# Zona mancing = SUB di area 16 (op 50: [area=16][sub=zona][x][y]).
+# Dari sniff live: sub=4 dipakai user (x1684) → zona mancing dipilih via 'sub'.
+# Zona 1..8 disiapkan generik — verifikasi tiap zona dengan test 1 casting.
+FISHING_ZONES = {}
+for _z in range(1, 9):
+    FISHING_ZONES[f"zona{_z}"] = {
+        "area": 16, "sub": _z, "spot": (284, 141),
+        "desc": f"Zona memancing #{_z} (area 16, sub {_z})",
+    }
+# map non-mancing (dipertahankan untuk fleksibilitas)
+FISHING_ZONES["farm25"] = {"area": 25, "sub": 0, "spot": (284, 141),
+                           "desc": "Kebun/farm area 25 (bukan spot mancing)"}
+DEFAULT_ZONE = "zona4"   # sub 4 = yang terverifikasi dari sniff (x1684)
 
 # Kategori alert yang BOLEH tampil di dashboard (v0.0.3 + revisi user):
 # utama: CASTING / CATCH / GET_FISH · status: LOGIN_OK / LOGIN_GAGAL / PUTUS / SELESAI
@@ -352,8 +356,9 @@ class AvatarDash(App):
     #alert-list { padding: 0 1; }
     #buttons { height: auto; padding: 0 1; }
     #zone-bar { height: auto; padding: 0 1; }
-    #zone-label { padding: 1 1; width: auto; }
-    .zone-btn { margin-right: 1; min-width: 8; }
+    #zone-bar > Static { padding: 0 1; width: auto; }
+    #zone-bar > Button { margin-right: 1; min-width: 7; border: none; height: 3; }
+    #zone-bar > Button.-success { border: tall $success; }
     Button { margin-right: 1; }
     """
     TITLE = f"Avatar Bot Dashboard v{VERSION}"
