@@ -1440,7 +1440,7 @@ def print_account_table(bots: List["AvatarBot"]):
 
 
 def run_multi_account(accounts: List[Tuple[str, str, str]], action: str,
-                      cycles: int = 1, use_panel: bool = True) -> List[AvatarBot]:
+                      cycles: int = 1, use_panel: bool = True, zone: int = 4) -> List[AvatarBot]:
     """
     Jalankan aksi untuk SEMUA akun secara sequential (aman dari rate-limit).
     Satu sesi login per akun, lalu aksi, lalu logout/close.
