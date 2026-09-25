@@ -37,11 +37,18 @@ _LOG_PATH = os.path.join(LOGS_DIR, f"dashboard_{_TS}.log")
 _log_file = open(_LOG_PATH, "w", buffering=1, encoding="utf-8")
 
 
-class _Tee:
-    """Tulis ke file, jangan ke layar."""
+_REAL_STDOUT = sys.__stdout__   # console asli (PowerShell)
+_REAL_STDERR = sys.__stderr__
 
-    def __init__(self, f):
+
+class _Tee:
+    """Tulis ke file, JANGAN ke layar.
+    isatty/fileno didelegasikan ke console asli supaya Textual tetap
+    mengenali terminal (kalau tidak, App.run() bisa exit tanpa pesan)."""
+
+    def __init__(self, f, real=None):
         self.f = f
+        self._real = real or _REAL_STDOUT
 
     def write(self, s):
         try:
@@ -57,7 +64,20 @@ class _Tee:
             pass
 
     def isatty(self):
-        return False
+        try:
+            return bool(self._real and self._real.isatty())
+        except Exception:
+            return False
+
+    def fileno(self):
+        try:
+            return self._real.fileno()
+        except Exception:
+            return -1
+
+    def __getattr__(self, name):
+        # sisa attribute (encoding, buffer, dsb) didelegasikan ke console asli
+        return getattr(self._real, name)
 
 
 # Import dependency DULU dengan error yang TERLIHAT di layar.
@@ -87,16 +107,28 @@ except ImportError as e:
     input("Tekan ENTER untuk keluar...")
     sys.exit(1)
 
-sys.stdout = _Tee(_log_file)
-sys.stderr = _Tee(_log_file)
+sys.stdout = _Tee(_log_file, _REAL_STDOUT)
+sys.stderr = _Tee(_log_file, _REAL_STDERR)
 
-from bot import (  # noqa: E402
-    AvatarBot,
-    load_accounts,
-    KNOWN_OPS,
-    HOST,
-    PORT,
-)
+# Import bot SETELAH redirect — kalau gagal, log ke file + tampilkan di layar.
+try:
+    from bot import (  # noqa: E402
+        AvatarBot,
+        load_accounts,
+        KNOWN_OPS,
+        HOST,
+        PORT,
+    )
+except Exception:
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+    import traceback as _tb
+    _tb.print_exc()
+    print()
+    print("Gagal import bot.py — lihat traceback di atas.")
+    print(f"Detail lengkap: {_LOG_PATH}")
+    input("Tekan ENTER untuk keluar...")
+    sys.exit(1)
 
 VERSION = "0.0.3"
 MAX_ALERTS = 5
