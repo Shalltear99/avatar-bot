@@ -490,7 +490,16 @@ class PacketFactory:
     def buy_bait(self) -> Frame:
         """Op 86: buy bait — empty payload (0 byte), server balas byte=1"""
         return Frame(86, b"")
-    
+
+    def send_chat(self, message: str) -> Frame:
+        """Op -6: CHAT_MSG — format [int senderId][UTF message]"""
+        ba = bytearray()
+        ba.extend(int(1).to_bytes(4, "big"))  # senderId (dari log sniff)
+        msg_bytes = message.encode('utf-8')
+        ba.extend(len(msg_bytes).to_bytes(2, "big"))
+        ba.extend(msg_bytes)
+        return Frame(-6, bytes(ba))
+
     def idle(self) -> Frame:
         # opcode 96: writeByte(0)
         return Frame(OP_IDLE, self._byte(0))
@@ -895,6 +904,59 @@ class AvatarBot:
         self.sniff_loop(seconds, "login")
         return True
     
+    def npc_buy_bait_coin(self) -> bool:
+        """Kirim chat 'CaUa' lalu pilih menu ke-0 ('Beli Umpan 500 Coin')."""
+        print(f"[>] Chat 'CaUa' untuk buka menu NPC umpan")
+        # 1. Kirim Chat "CaUa"
+        f = self.factory.send_chat("CaUa")
+        self._send(f.opcode, f.payload)
+        self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
+        time.sleep(1.5)
+        
+        # 2. Tunggu respons op -59 NPC_MENU
+        menu_received = False
+        start_time = time.time()
+        while time.time() - start_time < 5.0:
+            fr = self.sniffer.get(timeout=0.5)
+            if not fr: continue
+            if fr.opcode == -59:
+                print(f"[+] NPC menu diterima")
+                menu_received = True
+                break
+        
+        if not menu_received:
+            print("[-] NPC menu tidak diterima, mungkin belum di area NPC")
+            return False
+        
+        # 3. Kirim pilihan menu (op -61 NPC_INTERACT, menuId 0, index 0)
+        print(f"[>] Pilih NPC Menu 0 (Beli Umpan 500 Coin)")
+        ba = bytearray()
+        ba.extend(int(0).to_bytes(2, "big"))  # menuId 0 (Toko Pancing)
+        ba.extend(int(0).to_bytes(2, "big"))  # selected index 0 (Beli Umpan 500 Coin)
+        self._send(-61, bytes(ba))
+        self.outbound_log.append({'op': -61, 'hex': bytes(ba).hex(), 'ts': time.time()})
+        time.sleep(1.0)
+        
+        # 4. Tunggu respons op 86 BUY_BAIT
+        success = False
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
+            fr = self.sniffer.get(timeout=0.3)
+            if not fr: continue
+            if fr.opcode == 86:
+                if len(fr.payload) > 0:
+                    res = fr.payload[0]
+                    if res == 1:
+                        print("[+] Sukses beli umpan (500 Coin)")
+                        success = True
+                    else:
+                        print(f"[-] Gagal beli umpan (result={res})")
+                else:
+                    print("[?] BUY_BAIT tanpa payload")
+                break
+        
+        return success
+
     def run_fish(self, cycles: int = 3, sniff_per_cycle: int = 10,
                  area: int = 16, sub: int = 4, spot: tuple = (284, 141)):
         """Mode auto-fish: connect + handshake + login + fish loop.
@@ -904,6 +966,19 @@ class AvatarBot:
         if not self.do_login_sequence():
             return False
         time.sleep(3.0)  # tunggu login response
+        
+        # --- Beli Umpan sebelum mulai mancing ---
+        # Untuk bisa chat NPC, kita harus pindah ke area pemancingan terlebih dulu
+        print(f"\n[fish] Memasuki area mancing {area} sub {sub}...")
+        f = self.factory.move_map(area, sub, -1, -1)
+        self._send(f.opcode, f.payload)
+        self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
+        time.sleep(3.0)
+        self._drain_responses(1.5)
+        
+        print("[fish] Membeli umpan...")
+        self.npc_buy_bait_coin()
+        time.sleep(1.0)
         
         for i in range(cycles):
             print(f"\n=== FISH CYCLE {i+1}/{cycles} ===")
