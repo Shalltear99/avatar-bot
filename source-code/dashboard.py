@@ -79,6 +79,7 @@ from textual.widgets import (  # noqa: E402
     DataTable,
     Static,
     Button,
+    Input,
 )
 from textual.binding import Binding  # noqa: E402
 
@@ -90,18 +91,16 @@ MAX_ALERTS = 5
 # Tambahkan zona baru di sini setelah di-sniff dari HP.
 # =====================================================================
 # Zona mancing = SUB di area 16 (op 50: [area=16][sub=zona][x][y]).
-# Dari sniff live: sub=4 dipakai user (x1684) → zona mancing dipilih via 'sub'.
-# Zona 1..8 disiapkan generik — verifikasi tiap zona dengan test 1 casting.
+# USER KONFIRMASI: zona 1-39 valid (semua bisa dipakai mancing).
+# sub 4 = terverifikasi dari sniff live (x1684 pakai zona ini).
+MAX_FISH_ZONE = 39
 FISHING_ZONES = {}
-for _z in range(1, 9):
+for _z in range(1, MAX_FISH_ZONE + 1):
     FISHING_ZONES[f"zona{_z}"] = {
         "area": 16, "sub": _z, "spot": (284, 141),
-        "desc": f"Zona memancing #{_z} (area 16, sub {_z})",
+        "desc": f"Zona memancing #{_z}",
     }
-# map non-mancing (dipertahankan untuk fleksibilitas)
-FISHING_ZONES["farm25"] = {"area": 25, "sub": 0, "spot": (284, 141),
-                           "desc": "Kebun/farm area 25 (bukan spot mancing)"}
-DEFAULT_ZONE = "zona4"   # sub 4 = yang terverifikasi dari sniff (x1684)
+DEFAULT_ZONE = "zona4"   # sub 4 = terverifikasi dari sniff
 
 # Kategori alert yang BOLEH tampil di dashboard (v0.0.3 + revisi user):
 # utama: CASTING / CATCH / GET_FISH · status: LOGIN_OK / LOGIN_GAGAL / PUTUS / SELESAI
@@ -357,8 +356,8 @@ class AvatarDash(App):
     #buttons { height: auto; padding: 0 1; }
     #zone-bar { height: auto; padding: 0 1; }
     #zone-bar > Static { padding: 0 1; width: auto; }
-    #zone-bar > Button { margin-right: 1; min-width: 7; border: none; height: 3; }
-    #zone-bar > Button.-success { border: tall $success; }
+    #zone-bar > Button { margin-right: 1; min-width: 5; height: 3; }
+    .zone-input { width: 8; margin-right: 1; }
     Button { margin-right: 1; }
     """
     TITLE = f"Avatar Bot Dashboard v{VERSION}"
@@ -394,9 +393,13 @@ class AvatarDash(App):
             yield Button("⏹ Stop", id="btn-stop")
             yield Button("💾 Export (x)", id="btn-export")
         with Horizontal(id="zone-bar"):
-            yield Static("[b]Zona mancing:[/b]", id="zone-label")
-            for zname in FISHING_ZONES:
-                yield Button(zname, id=f"zone-{zname}", classes="zone-btn")
+            yield Static("[b]Zona:[/b]", id="zone-label")
+            yield Button("◀", id="zone-prev", classes="zone-btn")
+            yield Input(value="4", placeholder="1-39",
+                        id="zone-input", type="integer", classes="zone-input")
+            yield Button("▶", id="zone-next", classes="zone-btn")
+            yield Button("Set", id="zone-set", variant="primary", classes="zone-btn")
+            yield Static("", id="zone-desc")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -412,12 +415,34 @@ class AvatarDash(App):
         """Tampilkan zona aktif + koordinatnya di bar zona."""
         z = FISHING_ZONES[self.zone]
         self.query_one("#zone-label", Static).update(
-            f"[b]Zona mancing:[/b] [cyan]{self.zone}[/cyan] "
-            f"(area={z['area']}, sub={z['sub']}, spot={z['spot']})"
+            f"[b]Zona:[/b] [cyan]{self.zone}[/cyan]"
         )
-        for zname in FISHING_ZONES:
-            btn = self.query_one(f"#zone-{zname}", Button)
-            btn.variant = "success" if zname == self.zone else "default"
+        self.query_one("#zone-desc", Static).update(
+            f"[dim]area={z['area']} sub={z['sub']} spot={z['spot']}[/dim]"
+        )
+        inp = self.query_one("#zone-input", Input)
+        if str(z["sub"]) != inp.value:
+            inp.value = str(z["sub"])
+
+    def _zone_step(self, delta: int) -> None:
+        """◀ / ▶ — pindah zona +/-1 dalam rentang 1..39."""
+        cur = FISHING_ZONES[self.zone]["sub"]
+        nxt = min(MAX_FISH_ZONE, max(1, cur + delta))
+        self._set_zone(f"zona{nxt}")
+
+    def _zone_from_input(self) -> None:
+        """Ambil angka dari Input, validasi 1..39, set zona."""
+        raw = self.query_one("#zone-input", Input).value.strip()
+        try:
+            n = int(raw)
+        except ValueError:
+            self.bridge._log_tech(f"SYSTEM zona '{raw}' bukan angka")
+            return
+        if not 1 <= n <= MAX_FISH_ZONE:
+            self.bridge._log_tech(
+                f"SYSTEM zona {n} di luar rentang 1..{MAX_FISH_ZONE}")
+            return
+        self._set_zone(f"zona{n}")
 
     def _set_zone(self, zname: str) -> None:
         """Ganti zona mancing (tolak jika sesi sedang berjalan)."""
@@ -483,10 +508,18 @@ class AvatarDash(App):
             daemon=True,
         ).start()
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "zone-input":
+            self._zone_from_input()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id or ""
-        if bid.startswith("zone-"):
-            self._set_zone(bid[5:])
+        if bid == "zone-prev":
+            self._zone_step(-1)
+        elif bid == "zone-next":
+            self._zone_step(+1)
+        elif bid == "zone-set":
+            self._zone_from_input()
         elif bid == "btn-fish":
             self.action_toggle("fish")
         elif bid == "btn-farm":
