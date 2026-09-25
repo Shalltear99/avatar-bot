@@ -766,24 +766,24 @@ class AvatarBot:
         self.logged_in = True
         return True
     
-    def auto_fish_cycle(self):
+    def auto_fish_cycle(self, area: int = 16, sub: int = 4, spot: tuple = (284, 141)):
         """Siklus auto-fish — urutan REAL dari sniff proxy HP (24 Sep, area fishing):
-        1. op 50 move_map(area=16, sub=0, pos=0,0)  — pindah ke area mancing
+        1. op 50 move_map(area, sub, pos) — pindah ke area mancing (pilihan user)
         2. (tunggu server balas op 50 + op 54 confirm)
-        3. op 54 joinArea(X,Y,dir=2)              — duduk di spot mancing
+        3. op 54 joinArea(X,Y,dir=2) — duduk di spot mancing
         4. op 86 buyBait → op 82 → op 84 finishFishing(8 byte) → op 85 doCauCaXong
         """
-        print("[fish] Siklus auto-fish (urutan sniff proxy)...")
+        print(f"[fish] Siklus auto-fish (area={area}, sub={sub}, spot={spot})...")
 
-        # 0. Pindah ke area fishing (map 16, sub 4 dari v2) — dari sniff idx 238/523
-        print("[>] op50 move_map(area=16, sub=4, -1, -1)")
-        f = self.factory.move_map(16, 4, -1, -1)
+        # 0. Pindah ke area fishing yang dipilih user
+        print(f"[>] op50 move_map(area={area}, sub={sub}, -1, -1)")
+        f = self.factory.move_map(area, sub, -1, -1)
         self._send(f.opcode, f.payload)
         self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
         time.sleep(2.5)
         self._drain_responses(1.5)
 
-        X, Y = 284, 141   # posisi duduk mancing dari sniff (idx 299-321)
+        X, Y = spot  # posisi duduk mancing (default dari sniff idx 299-321)
 
         # 1. join area fishing (duduk di spot)
         f = self.factory.join_area(X, Y, direction=2)
@@ -895,8 +895,10 @@ class AvatarBot:
         self.sniff_loop(seconds, "login")
         return True
     
-    def run_fish(self, cycles: int = 3, sniff_per_cycle: int = 10):
-        """Mode auto-fish: connect + handshake + login + fish loop"""
+    def run_fish(self, cycles: int = 3, sniff_per_cycle: int = 10,
+                 area: int = 16, sub: int = 4, spot: tuple = (284, 141)):
+        """Mode auto-fish: connect + handshake + login + fish loop.
+        area/sub/spot bisa diisi dari dashboard (menu pilih zona)."""
         if not self.connect_and_handshake():
             return False
         if not self.do_login_sequence():
@@ -905,7 +907,7 @@ class AvatarBot:
         
         for i in range(cycles):
             print(f"\n=== FISH CYCLE {i+1}/{cycles} ===")
-            self.auto_fish_cycle()
+            self.auto_fish_cycle(area=area, sub=sub, spot=spot)
             self.sniff_loop(sniff_per_cycle, f"fish-{i+1}")
             time.sleep(2.0)
         return True
@@ -1056,8 +1058,9 @@ class AvatarBot:
             time.sleep(5.0)
         return True
 
-    def run_farm_and_fish(self, farm_cycles: int = 1, fish_cycles: int = 1):
-        """Kombinasi: farm dulu, lalu fish"""
+    def run_farm_and_fish(self, farm_cycles: int = 1, fish_cycles: int = 1,
+                          area: int = 16, sub: int = 4, spot: tuple = (284, 141)):
+        """Kombinasi: farm dulu, lalu fish (zona fish bisa dipilih)"""
         if not self.connect_and_handshake():
             return False
         if not self.do_login_sequence():
@@ -1071,7 +1074,7 @@ class AvatarBot:
 
         for i in range(fish_cycles):
             print(f"\n=== FISH CYCLE {i+1}/{fish_cycles} ===")
-            self.auto_fish_cycle()
+            self.auto_fish_cycle(area=area, sub=sub, spot=spot)
             self.sniff_loop(8, f"fish-{i+1}")
             time.sleep(2.0)
         return True

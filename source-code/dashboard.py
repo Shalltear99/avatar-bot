@@ -85,6 +85,20 @@ from textual.binding import Binding  # noqa: E402
 VERSION = "0.0.3"
 MAX_ALERTS = 5
 
+# =====================================================================
+# DAFTAR ZONA MANCING — area ID dari sniff live (op 50 move_map).
+# Tambahkan zona baru di sini setelah di-sniff dari HP.
+# =====================================================================
+FISHING_ZONES = {
+    "default":  {"area": 16, "sub": 4,   "spot": (284, 141),
+                 "desc": "Area mancing default (dari sniff v2)"},
+    "farm25":   {"area": 25, "sub": 0,   "spot": (284, 141),
+                 "desc": "Kebun/farm area 25 (spot sama, perlu verifikasi)"},
+    "kota13":   {"area": 13, "sub": 255, "spot": (284, 141),
+                 "desc": "Kota (area 13, sub=255 main map)"},
+}
+DEFAULT_ZONE = "default"
+
 # Kategori alert yang BOLEH tampil di dashboard (v0.0.3 + revisi user):
 # utama: CASTING / CATCH / GET_FISH · status: LOGIN_OK / LOGIN_GAGAL / PUTUS / SELESAI
 ALLOWED_ALERT_TAGS = {"LOGIN_OK", "LOGIN_GAGAL", "PUTUS", "SELESAI",
@@ -94,11 +108,17 @@ ALLOWED_ALERT_TAGS = {"LOGIN_OK", "LOGIN_GAGAL", "PUTUS", "SELESAI",
 class AccountWorker:
     """Satu worker per akun, jalan di thread terpisah (PARALEL)."""
 
-    def __init__(self, user: str, pwd: str, label: str, bridge):
+    def __init__(self, user: str, pwd: str, label: str, bridge,
+                 zone: str = "default"):
         self.user = user
         self.pwd = pwd
         self.label = label
         self.bridge = bridge
+        self.zone = zone
+        z = FISHING_ZONES.get(zone, FISHING_ZONES[DEFAULT_ZONE])
+        self.area = z["area"]
+        self.sub = z["sub"]
+        self.spot = z["spot"]
         self.bot = AvatarBot(user, pwd, label)
         self.thread = None
         self.fished = 0          # casting dikirim (op 82)
@@ -227,11 +247,15 @@ class AccountWorker:
             try:
                 self.status = "login"
                 if action == "fish":
-                    ok = self.bot.run_fish(cycles=9999)
+                    ok = self.bot.run_fish(cycles=9999,
+                                           area=self.area, sub=self.sub,
+                                           spot=self.spot)
                 elif action == "farm":
                     ok = self.bot.run_farm(cycles=9999)
                 elif action == "all":
-                    ok = self.bot.run_farm_and_fish(farm_cycles=9999, fish_cycles=9999)
+                    ok = self.bot.run_farm_and_fish(farm_cycles=9999, fish_cycles=9999,
+                                                     area=self.area, sub=self.sub,
+                                                     spot=self.spot)
                 else:
                     return
                 if not ok:
@@ -287,11 +311,12 @@ class WorkerBridge:
         _log_file.write(f"{time.strftime('%H:%M:%S')} {text}\n")
 
     # ---- kontrol ----
-    def start(self, action: str, accounts: list):
+    def start(self, action: str, accounts: list, zone: str = DEFAULT_ZONE):
         if self.is_busy():
             return
         self._action = action
-        self.workers = [AccountWorker(u, p, l, self) for u, p, l in accounts]
+        self.workers = [AccountWorker(u, p, l, self, zone=zone)
+                        for u, p, l in accounts]
         for w in self.workers:
             w.status = "starting"
             w.start(action)
@@ -326,6 +351,9 @@ class AvatarDash(App):
     #alerts { height: 8; border: round $accent; padding: 0 1; }
     #alert-list { padding: 0 1; }
     #buttons { height: auto; padding: 0 1; }
+    #zone-bar { height: auto; padding: 0 1; }
+    #zone-label { padding: 1 1; width: auto; }
+    .zone-btn { margin-right: 1; min-width: 8; }
     Button { margin-right: 1; }
     """
     TITLE = f"Avatar Bot Dashboard v{VERSION}"
@@ -360,6 +388,10 @@ class AvatarDash(App):
             yield Button("▶ All (a)", id="btn-all")
             yield Button("⏹ Stop", id="btn-stop")
             yield Button("💾 Export (x)", id="btn-export")
+        with Horizontal(id="zone-bar"):
+            yield Static("[b]Zona mancing:[/b]", id="zone-label")
+            for zname in FISHING_ZONES:
+                yield Button(zname, id=f"zone-{zname}", classes="zone-btn")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -369,6 +401,29 @@ class AvatarDash(App):
                     "Casting", "Catch", "Get Fish"):
             table.add_column(col)
         self.set_interval(1.0, self.refresh_data)
+        self._refresh_zone_highlight()
+
+    def _refresh_zone_highlight(self):
+        """Tampilkan zona aktif + koordinatnya di bar zona."""
+        z = FISHING_ZONES[self.zone]
+        self.query_one("#zone-label", Static).update(
+            f"[b]Zona mancing:[/b] [cyan]{self.zone}[/cyan] "
+            f"(area={z['area']}, sub={z['sub']}, spot={z['spot']})"
+        )
+        for zname in FISHING_ZONES:
+            btn = self.query_one(f"#zone-{zname}", Button)
+            btn.variant = "success" if zname == self.zone else "default"
+
+    def _set_zone(self, zname: str) -> None:
+        """Ganti zona mancing (tolak jika sesi sedang berjalan)."""
+        if self.bridge.is_busy():
+            self.bridge._log_tech(f"SYSTEM zona '{zname}' DITOLAK — sesi berjalan")
+            return
+        if zname in FISHING_ZONES:
+            self.zone = zname
+            self._refresh_zone_highlight()
+            self.bridge._log_tech(f"SYSTEM zona → {zname} "
+                                  f"(area={FISHING_ZONES[zname]['area']})")
 
     def refresh_data(self) -> None:
         snap = self.bridge.snapshot()
@@ -409,7 +464,7 @@ class AvatarDash(App):
     def action_toggle(self, action: str) -> None:
         if self.bridge.is_busy():
             return
-        self.bridge.start(action, self.accounts)
+        self.bridge.start(action, self.accounts, zone=self.zone)
 
     def action_proxy(self) -> None:
         if self.bridge.is_busy():
@@ -424,8 +479,10 @@ class AvatarDash(App):
         ).start()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        bid = event.button.id
-        if bid == "btn-fish":
+        bid = event.button.id or ""
+        if bid.startswith("zone-"):
+            self._set_zone(bid[5:])
+        elif bid == "btn-fish":
             self.action_toggle("fish")
         elif bid == "btn-farm":
             self.action_toggle("farm")
