@@ -1,30 +1,21 @@
 #!/usr/bin/env python3
 """
-dashboard.py — TUI Dashboard Avatar Bot (Textual + Rich) v0.0.2
+dashboard.py — TUI Dashboard Avatar Bot (Textual + Rich) v0.0.3
 ===============================================================
-Menampilkan DASHBOARD SAJA: log & hasil sniff TIDAK ditampilkan di layar
-(semua di-redirect ke file logs/dashboard_*.log).
+DASHBOARD BERSIH (PRD v0.0.3):
+  - Hanya ringkasan status di layar: tabel akun + stats bar + alert card.
+  - TIDAK tampil: payload, hex, opcode, frame counter, unknown-op, stack trace.
+  - Semua detail teknis → logs/dashboard_*.log
+  - Kolom Gold & Stat tampil "?" sampai terverifikasi lewat analisis payload.
+  - Alert card (maks 5): LOGIN_OK / LOGIN_GAGAL / PUTUS / IKAN_DAPAT / SELESAI.
 
-Perubahan v0.0.2:
-  - Multi-akun PARALEL (login + farming bersamaan, bukan bergantian)
-  - Track jumlah mancing & ikan didapat per akun
-  - Parse op 91 FISH_RESULT (simpan PNG ikan ke logs/fish_catch/)
-  - Track gold/coin dari op -33 COIN_UPDATE
-  - Extract info dari op -22 (stat update)
-  - Fish result detail di tabel (nama file PNG + ukuran)
+Jalankan (Windows): .\\.venv\\Scripts\\python.exe source-code\\dashboard.py
+Jalankan (Linux):   .venv/bin/python source-code/dashboard.py
 
-Jalankan:
-    .venv/bin/python dashboard.py
-
-Tombol:
-    f = mulai/stop auto-fish   |  m = mulai/stop auto-farm
-    a = mulai/stop ALL (farm+fish semua akun, PARALEL)
-    s = snapshot statistik     |  x = export sesi sniff (JSON)
-    q = keluar
+Tombol: f fish · m farm · a all · p proxy · s snapshot · x export · q keluar
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
 import time
@@ -35,7 +26,7 @@ import traceback
 from datetime import datetime
 
 # =====================================================================
-# SUPPRESS OUTPUT — log/sniff tidak boleh muncul di layar dashboard.
+# LOG KE FILE — output teknis TIDAK boleh muncul di layar dashboard.
 # =====================================================================
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")
@@ -72,29 +63,32 @@ class _Tee:
 sys.stdout = _Tee(_log_file)
 sys.stderr = _Tee(_log_file)
 
-# sekarang aman import bot (print-nya akan masuk file)
 from bot import (  # noqa: E402
     AvatarBot,
     load_accounts,
     KNOWN_OPS,
-    run_proxy_sniff,
     HOST,
     PORT,
 )
 
 from textual.app import App, ComposeResult  # noqa: E402
-from textual.containers import Horizontal  # noqa: E402
+from textual.containers import Horizontal, Vertical  # noqa: E402
 from textual.widgets import (  # noqa: E402
     Header,
     Footer,
     DataTable,
     Static,
-    RichLog,
     Button,
 )
 from textual.binding import Binding  # noqa: E402
 
-VERSION = "0.0.2"
+VERSION = "0.0.3"
+MAX_ALERTS = 5
+
+# Kategori alert yang BOLEH tampil di dashboard (v0.0.3 + revisi user):
+# utama: CASTING / CATCH / GET_FISH · status: LOGIN_OK / LOGIN_GAGAL / PUTUS / SELESAI
+ALLOWED_ALERT_TAGS = {"LOGIN_OK", "LOGIN_GAGAL", "PUTUS", "SELESAI",
+                      "CASTING", "CATCH", "GET_FISH"}
 
 
 class AccountWorker:
@@ -107,15 +101,15 @@ class AccountWorker:
         self.bridge = bridge
         self.bot = AvatarBot(user, pwd, label)
         self.thread = None
-        self.fished = 0          # jumlah casting/man'sik
-        self.caught = 0          # jumlah ikan tertangkap
-        self.gold = None         # gold/coin terakhir
-        self.last_catch = None   # (file_png, size_bytes, timestamp)
+        self.fished = 0          # casting dikirim (op 82)
+        self.caught = 0          # ikan tertangkap (op 91)
+        self.coin = None         # coin = currency in-game (op -33, belum terverifikasi)
+        self.gold = None         # gold = premium currency (belum terverifikasi)
+        self.last_catch = None   # (file_png, size, ts)
         self.status = "menunggu"
         self.error = None
-        self._patched = False
 
-    # ---------- patch on_frame ----------
+    # ---------- frame callback ----------
     def _make_cb(self):
         bridge = self.bridge
         label = self.label
@@ -124,102 +118,87 @@ class AccountWorker:
             op = frame.opcode
             payload = frame.payload
 
-            # op82 CAST_ROD → increase mancing count
-            if op == 82:
+            if op == 82:                       # CAST_ROD → alert CASTING
                 self.fished += 1
-                bridge._evt(f"[{label}] 🎣 Casting #{self.fished} len={len(payload)}")
+                bridge._alert(label, "CASTING",
+                              f"🎣 casting #{self.fished}")
+                bridge._log_tech(f"[{label}] op82 casting #{self.fished}")
 
-            # op91 FISH_RESULT → ikan tertangkap + simpan PNG
-            elif op == 91:
+            elif op == 91:                     # FISH_RESULT → CATCH + GET_FISH
                 self.caught += 1
                 png_path = self._save_fish_png(payload)
-                size = len(payload)
-                self.last_catch = (png_path, size, time.time())
-                bridge._evt(
-                    f"[{label}] 🐟 IKAN #{self.caught}! "
-                    f"PNG={os.path.basename(png_path) if png_path else '-'} "
-                    f"({size} bytes)"
-                )
+                self.last_catch = (png_path, len(payload), time.time())
+                bridge._alert(label, "CATCH",
+                              f"✅ catch #{self.caught}")
+                bridge._alert(label, "GET_FISH",
+                              f"🐟 get fish! ({os.path.basename(png_path) if png_path else 'no-png'})")
+                bridge._log_tech(f"[{label}] op91 fish #{self.caught} "
+                                 f"png={os.path.basename(png_path or '')}")
 
-            # op -33 COIN_UPDATE → parse gold
-            elif op == -33:
-                gold = self._parse_gold(payload)
-                if gold is not None and gold != self.gold:
+            elif op == -33:                    # CURRENCY_UPDATE (belum terverifikasi)
+                coin, gold = self._parse_currency(payload)
+                if coin is not None:
+                    self.coin = coin
+                if gold is not None:
                     self.gold = gold
-                    bridge._evt(f"[{label}] 💰 Gold/coin: {gold}")
+                bridge._log_tech(f"[{label}] op-33 currency-update "
+                                 f"(belum diverifikasi)")
 
-            # op -22 STAT_UPDATE → extract fish count
-            elif op == -22:
-                stat = self._parse_stat(payload)
-                if stat:
-                    bridge._evt(f"[{label}] 📊 Stat update: {stat}")
+            elif op == -22:                    # STAT_UPDATE (belum terverifikasi)
+                bridge._log_tech(f"[{label}] op-22 stat-update (belum diverifikasi)")
 
-            # op -8 WELCOME
-            elif op == -8:
-                bridge._evt(f"[{label}] ✅ Login OK (welcome)")
+            elif op == -8:                     # WELCOME → login sukses
+                bridge._alert(label, "LOGIN_OK", "✅ login berhasil")
 
-            # op -4 ZONE_INFO
-            elif op == -4 and len(payload) >= 4:
-                uid = struct.unpack(">i", payload[:4])[0]
-                self.bot.user_id = uid
-                bridge._evt(f"[{label}] 📍 UID: {uid}")
+            elif op == -4 and len(payload) >= 4:   # ZONE_INFO → UID
+                try:
+                    uid = struct.unpack(">i", payload[:4])[0]
+                    self.bot.user_id = uid
+                    bridge._log_tech(f"[{label}] UID {uid}")
+                except Exception:
+                    pass
 
-            # op -63 MAP_CONFIRM
-            elif op == -63:
-                bridge._evt(f"[{label}] 🗺️ Map confirm")
+            elif op == 66:                     # FARM_HARVEST
+                bridge._log_tech(f"[{label}] op66 farm harvest")
 
-            # op 66 FARM_HARVEST
-            elif op == 66:
-                self.caught += 1
-                bridge._evt(f"[{label}] 🌾 Farm harvest response")
-
-            # unknown op
-            elif op not in KNOWN_OPS:
-                bridge._evt(f"[{label}] ⚠️ UNKNOWN op {op} len={len(payload)}")
+            elif op not in KNOWN_OPS:          # unknown → file log saja
+                bridge._log_tech(
+                    f"[{label}] UNKNOWN op {op} len={len(payload)}"
+                )
 
         return cb
 
-    def _parse_gold(self, payload: bytes):
-        """Parse op -33 COIN_UPDATE: [int0][short0][short gold][...]"""
+    def _parse_currency(self, payload: bytes):
+        """
+        PARIAL — struktur op -33 belum terverifikasi.
+        Return (coin, gold); keduanya None kalau tidak bisa diparse.
+        Coin = in-game currency, Gold = premium currency.
+        """
+        coin = gold = None
         if len(payload) >= 8:
             try:
-                return struct.unpack(">H", payload[6:8])[0]
+                coin = struct.unpack(">H", payload[6:8])[0]
             except Exception:
-                return None
-        return None
-
-    def _parse_stat(self, payload: bytes):
-        """Parse op -22 STAT_UPDATE: extract key fields"""
-        if len(payload) >= 8:
-            try:
-                uid = struct.unpack(">i", payload[:4])[0]
-                fish = struct.unpack(">H", payload[4:6])[0]
-                return f"uid={uid} stat={fish}"
-            except Exception:
-                return None
-        return None
+                pass
+        return coin, gold
 
     def _save_fish_png(self, payload: bytes):
-        """Cari PNG signature di payload, simpan ke logs/fish_catch/"""
+        """Simpan PNG ikan (kalau ada) ke logs/fish_catch/."""
         try:
             idx = payload.find(b"\x89PNG")
             if idx == -1:
                 return None
-            png = payload[idx:]
             fname = f"{self.label}_{int(time.time())}_{self.caught}.png"
             fpath = os.path.join(LOGS_DIR, "fish_catch", fname)
             with open(fpath, "wb") as f:
-                f.write(png)
+                f.write(payload[idx:])
             return fpath
         except Exception:
             return None
 
-    # ---------- worker ----------
+    # ---------- lifecycle ----------
     def _wrap_login(self):
-        """Pastikan on_frame terpasang setiap do_login_sequence."""
-        bridge = self.bridge
         orig = self.bot.do_login_sequence
-        self.bot.sniffer = None
 
         def patched():
             ok = orig()
@@ -258,20 +237,24 @@ class AccountWorker:
                 if not ok:
                     self.error = "connect/login gagal"
                     self.status = "error"
+                    self.bridge._alert(self.label, "LOGIN_GAGAL",
+                                       "❌ connect/login gagal")
             except Exception as e:
                 self.error = str(e)
                 self.status = "error"
-                self.bridge._evt(f"[{self.label}] ❌ Error: {e}")
+                self.bridge._alert(self.label, "PUTUS", "❌ koneksi terputus")
                 _log_file.write(traceback.format_exc())
             finally:
                 self.bot.close()
+                self.bridge._alert(self.label, "SELESAI", "worker selesai")
 
     def info(self) -> dict:
         d = self.bot.info()
         d.update({
             "fished": self.fished,
             "caught": self.caught,
-            "gold": self.gold,
+            "coin": self.coin,          # UI tetap tampil "?" (belum terverifikasi)
+            "gold": self.gold,          # UI tetap tampil "?" (belum terverifikasi)
             "last_catch": self.last_catch,
             "status": self.status,
             "error": self.error,
@@ -280,58 +263,57 @@ class AccountWorker:
 
 
 class WorkerBridge:
-    """Mengelola semua worker (satu per akun) — PARALEL."""
+    """Kumpulan worker paralel + pemisahan alert (UI) vs log teknis (file)."""
 
     def __init__(self):
         self.workers: list[AccountWorker] = []
-        self.running: dict[str, bool] = {}
-        self.events: list[str] = []
+        self.alerts: list[dict] = []      # {label, tag, text, ts} — untuk UI
         self._lock = threading.Lock()
         self._action = None
 
+    # ---- UI: hanya alert penting ----
+    def _alert(self, label: str, tag: str, text: str):
+        if tag not in ALLOWED_ALERT_TAGS:
+            return
+        with self._lock:
+            self.alerts.append(
+                {"label": label, "tag": tag, "text": text,
+                 "ts": time.strftime("%H:%M:%S")}
+            )
+            self.alerts[:] = self.alerts[-MAX_ALERTS:]
+
+    # ---- file: semua detail teknis ----
+    def _log_tech(self, text: str):
+        _log_file.write(f"{time.strftime('%H:%M:%S')} {text}\n")
+
+    # ---- kontrol ----
     def start(self, action: str, accounts: list):
         if self.is_busy():
             return
         self._action = action
-        self.running[action] = True
-        # buat worker untuk setiap akun — semua dalam thread sendiri (PARALEL)
-        self.workers = [
-            AccountWorker(u, p, l, self) for u, p, l in accounts
-        ]
-        # start SEMUA worker sekaligus (paralel)
+        self.workers = [AccountWorker(u, p, l, self) for u, p, l in accounts]
         for w in self.workers:
             w.status = "starting"
             w.start(action)
-        self._evt(f"[SYSTEM] ▶ {action} start untuk {len(accounts)} akun (PARALEL)")
+        self._log_tech(f"SYSTEM ▶ {action} start untuk {len(accounts)} akun (paralel)")
 
     def is_busy(self):
         return any(w.thread and w.thread.is_alive() for w in self.workers)
 
     def stop(self):
-        self.running[self._action or ""] = False
         for w in self.workers:
             w.stop()
-        self._evt("[SYSTEM] ⏹ Stop diminta ke semua worker")
-
-    def _evt(self, text: str):
-        ts = time.strftime("%H:%M:%S")
-        with self._lock:
-            self.events.append(f"{ts} {text}")
-            self.events[:] = self.events[-200:]
+        self._log_tech("SYSTEM ⏹ stop diminta ke semua worker")
 
     def snapshot(self) -> dict:
         with self._lock:
-            evs = list(self.events[-15:])
+            alerts = list(self.alerts)
         per_bot = [w.info() for w in self.workers]
-        total_fished = sum(w.fished for w in self.workers)
-        total_caught = sum(w.caught for w in self.workers)
-        gold_vals = [w.gold for w in self.workers if w.gold is not None]
         return {
             "per_bot": per_bot,
-            "total_fished": total_fished,
-            "total_caught": total_caught,
-            "total_gold": sum(gold_vals) if gold_vals else None,
-            "events": evs,
+            "total_fished": sum(w.fished for w in self.workers),
+            "total_caught": sum(w.caught for w in self.workers),
+            "alerts": alerts,
             "busy": self.is_busy(),
         }
 
@@ -341,12 +323,13 @@ class AvatarDash(App):
     Screen { layout: vertical; }
     #stats { height: auto; padding: 0 1; }
     #table { height: 1fr; }
-    #events { height: 30%; border: round $accent; padding: 0 1; }
+    #alerts { height: 8; border: round $accent; padding: 0 1; }
+    #alert-list { padding: 0 1; }
     #buttons { height: auto; padding: 0 1; }
     Button { margin-right: 1; }
     """
     TITLE = f"Avatar Bot Dashboard v{VERSION}"
-    SUB_TITLE = "multi-akun paralel · log ke file"
+    SUB_TITLE = "dashboard bersih · detail teknis hanya di logs/"
 
     BINDINGS = [
         Binding("f", "toggle('fish')", "Fish"),
@@ -361,92 +344,84 @@ class AvatarDash(App):
     def __init__(self):
         super().__init__()
         self.bridge = WorkerBridge()
-        self.accounts = load_accounts("akun.txt")
+        self.accounts = load_accounts(
+            os.path.join(PROJECT_ROOT, "source-code", "akun.txt"))
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static(id="stats")
         yield DataTable(id="table")
+        with Vertical(id="alerts"):
+            yield Static("[b]Alert[/b] (maks 5)", id="alert-title")
+            yield Static("(belum ada)", id="alert-list")
         with Horizontal(id="buttons"):
             yield Button("▶ Fish (f)", id="btn-fish")
             yield Button("▶ Farm (m)", id="btn-farm")
             yield Button("▶ All (a)", id="btn-all")
             yield Button("⏹ Stop", id="btn-stop")
             yield Button("💾 Export (x)", id="btn-export")
-        yield RichLog(id="events", highlight=False, markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.query_one("#table", DataTable)
         table.cursor_type = "row"
-        for col in ("Akun", "UID", "Status", "Gold", "Mancing", "Ikan", "In", "Out", "Unk"):
+        for col in ("Akun", "UID", "Status", "Coin", "Gold",
+                    "Casting", "Catch", "Get Fish"):
             table.add_column(col)
         self.set_interval(1.0, self.refresh_data)
-        self._log_evt(
-            f"[dim]Dashboard v{VERSION} siap — "
-            f"{len(self.accounts)} akun dimuat. Log: {_LOG_PATH}[/dim]"
-        )
-
-    def _log_evt(self, text: str):
-        self.query_one("#events", RichLog).write(text)
 
     def refresh_data(self) -> None:
         snap = self.bridge.snapshot()
-        st = snap["per_bot"]
         table = self.query_one("#table", DataTable)
         table.clear()
-        if not st:
-            table.add_row("(belum ada sesi — tekan f/m/a untuk mulai)",
-                          "-", "-", "-", "-", "-", "-", "-", "-")
-        for d in st:
-            sn = d.get("sniffer") or {}
-            status = d.get("status", "?")
-            unk = len(sn.get("unknown_ops", []))
+        if not snap["per_bot"]:
+            table.add_row("(tekan f / m / a untuk mulai)",
+                          "-", "-", "?", "?", "-", "-", "-")
+        for d in snap["per_bot"]:
+            # Coin & Gold → selalu "?" (belum terverifikasi, PRD v0.0.3)
             table.add_row(
                 d["label"],
                 str(d.get("user_id") or "-"),
-                status,
-                str(d.get("gold") or "-"),
+                d.get("status", "?"),
+                "?",   # coin  (in-game, belum terverifikasi)
+                "?",   # gold  (premium, belum terverifikasi)
                 str(d.get("fished", 0)),
                 str(d.get("caught", 0)),
-                str(sn.get("frames_in", 0)),
-                str(sn.get("frames_out", 0)),
-                str(unk),
+                str(d.get("caught", 0)),
             )
-        # stats bar
-        gold = snap["total_gold"]
-        gold_s = f"{gold}" if gold is not None else "-"
         self.query_one("#stats", Static).update(
-            f"🎣 Total Mancing: [b]{snap['total_fished']}[/b]   "
-            f"🐟 Ikan: [b]{snap['total_caught']}[/b]   "
-            f"💰 Gold: [b]{gold_s}[/b]   "
-            f"Akun aktif: {len(snap['per_bot'])}   "
+            f"🎣 Casting: [b]{snap['total_fished']}[/b]   "
+            f"✅ Catch: [b]{snap['total_caught']}[/b]   "
+            f"🐟 Get Fish: [b]{snap['total_caught']}[/b]   "
+            f"🪙 Coin: [b]?[/b] · 💰 Gold: [b]?[/b] (belum terverifikasi)   "
+            f"Akun: {len(snap['per_bot'])}   "
             f"Status: {'[green]BERJALAN[/green]' if snap['busy'] else '[yellow]idle[/yellow]'}"
         )
-        # event baru dari bridge → RichLog
-        evs = snap["events"]
-        seen = getattr(self, "_seen_events", 0)
-        if len(evs) > seen:
-            for e in evs[seen:]:
-                self._log_evt(e.replace("[", "\\[") if "\\[" not in e else e)
-            self._seen_events = len(evs)
+        alerts = snap["alerts"]
+        if alerts:
+            lines = [
+                f"[dim]{a['ts']}[/dim] [{a['label']}] {a['text']}"
+                for a in alerts[-MAX_ALERTS:]
+            ]
+            self.query_one("#alert-list", Static).update("\n".join(lines))
 
+    # ---------- actions ----------
     def action_toggle(self, action: str) -> None:
         if self.bridge.is_busy():
-            self._log_evt("[yellow]Sesi sedang berjalan — tekan Stop dulu.[/yellow]")
             return
         self.bridge.start(action, self.accounts)
-        self._log_evt(
-            f"[green]▶ Start {action} untuk {len(self.accounts)} akun "
-            f"(PARALEL)[/green]"
-        )
 
     def action_proxy(self) -> None:
         if self.bridge.is_busy():
-            self._log_evt("[yellow]Sesi sedang berjalan — tekan Stop dulu.[/yellow]")
             return
-        self._log_evt("[green]▶ Proxy aktif di :19126 (dump: logs/proxy_sniff.log)[/green]")
-        self.bridge.start("proxy", [])
+        self.bridge._log_tech("SYSTEM ▶ proxy mode (dashboard tidak menampilkan sniff)")
+        from bot import run_proxy_sniff
+        threading.Thread(
+            target=run_proxy_sniff,
+            args=("0.0.0.0", 19126, HOST, PORT,
+                  os.path.join(LOGS_DIR, "proxy_sniff.log")),
+            daemon=True,
+        ).start()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         bid = event.button.id
@@ -458,26 +433,26 @@ class AvatarDash(App):
             self.action_toggle("all")
         elif bid == "btn-stop":
             self.bridge.stop()
-            self._log_evt("[red]⏹ Stop diminta[/red]")
         elif bid == "btn-export":
             self.action_export()
 
     def action_snapshot(self) -> None:
-        snap = self.bridge.snapshot()
         import json
-        path = os.path.join(LOGS_DIR, f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        path = os.path.join(
+            LOGS_DIR,
+            f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
         with open(path, "w") as f:
-            json.dump(snap, f, indent=2, ensure_ascii=False, default=str)
-        self._log_evt(f"[blue]Snapshot → {path}[/blue]")
+            json.dump(self.bridge.snapshot(), f, indent=2,
+                      ensure_ascii=False, default=str)
+        self.bridge._log_tech(f"SYSTEM snapshot → {path}")
 
     def action_export(self) -> None:
-        n = 0
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         for w in self.bridge.workers:
             if w.bot.sniffer:
-                w.bot.sniffer.export_json(os.path.join(LOGS_DIR, f"sniff_session_{w.label}_{ts}.json"))
-                n += 1
-        self._log_evt(f"[blue]Export {n} sesi sniff selesai[/blue]")
+                w.bot.sniffer.export_json(os.path.join(
+                    LOGS_DIR, f"sniff_session_{w.label}_{ts}.json"))
+        self.bridge._log_tech("SYSTEM export sniff selesai")
 
     def action_quit(self) -> None:
         self.bridge.stop()
@@ -485,8 +460,7 @@ class AvatarDash(App):
 
 
 def main():
-    app = AvatarDash()
-    app.run()
+    AvatarDash().run()
 
 
 if __name__ == "__main__":
