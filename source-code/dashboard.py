@@ -425,6 +425,7 @@ class AvatarDash(App):
         self.bridge = WorkerBridge()
         self.accounts = load_accounts(
             os.path.join(PROJECT_ROOT, "source-code", "akun.txt"))
+        self.zone = DEFAULT_ZONE  # zona mancing aktif (default dari sniff)
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
