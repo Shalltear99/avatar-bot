@@ -801,28 +801,24 @@ class AvatarBot:
         print(f"[>] op54 joinArea({X},{Y},dir=2) -> {f}")
         time.sleep(1.5)
 
-        # 2. buy bait
-        f = self.factory.buy_bait()
-        self._send(f.opcode, f.payload)
-        self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
-        print(f"[>] op86 buyBait() -> {f}")
-        time.sleep(1.0)
+        # 2. buy bait — SKIP, sudah dibeli sekali di run_fish via buy_bait_direct()
+        # (di log real player hanya beli umpan SEKALI saat masuk area, bukan per-cast)
 
-        # 3. action 82 (cast / mulai pancing)
+        # 2. action 82 (cast / mulai pancing)
         f = self.factory.action_82()
         self._send(f.opcode, f.payload)
         self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
         print(f"[>] op82 action() -> {f}")
         time.sleep(2.0)
 
-        # 4. finish fishing (8 byte hasil tangkapan)
+        # 3. finish fishing (8 byte hasil tangkapan)
         f = self.factory.finish_fishing()
         self._send(f.opcode, f.payload)
         self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
         print(f"[>] op84 finishFishing(01 06 03 01 03 01 03 02) -> {f}")
         time.sleep(1.0)
 
-        # 5. doCauCaXong (selesai mancing)
+        # 4. doCauCaXong (selesai mancing)
         f = self.factory.do_cau_ca_xong()
         self._send(f.opcode, f.payload)
         self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
@@ -904,47 +900,22 @@ class AvatarBot:
         self.sniff_loop(seconds, "login")
         return True
     
-    def npc_buy_bait_coin(self) -> bool:
-        """Kirim chat 'CaUa' lalu pilih menu ke-0 ('Beli Umpan 500 Coin')."""
-        print(f"[>] Chat 'CaUa' untuk buka menu NPC umpan")
-        # 1. Kirim Chat "CaUa"
-        f = self.factory.send_chat("CaUa")
-        self._send(f.opcode, f.payload)
-        self.outbound_log.append({'op': f.opcode, 'hex': f.payload.hex(), 'ts': time.time()})
-        time.sleep(1.5)
+    def buy_bait_direct(self) -> bool:
+        """Kirim op 86 BUY_BAIT dengan payload kosong, tunggu balasan result=1."""
+        print(f"[>] Buy bait (op 86) dengan payload kosong")
+        # Kirim BUY_BAIT dengan payload kosong
+        self._send(86, b"")
+        self.outbound_log.append({'op': 86, 'hex': '', 'ts': time.time()})
+        time.sleep(0.8)
         
-        # 2. Tunggu respons op -59 NPC_MENU
-        menu_received = False
-        start_time = time.time()
-        while time.time() - start_time < 5.0:
-            fr = self.sniffer.get(timeout=0.5)
-            if not fr: continue
-            if fr.opcode == -59:
-                print(f"[+] NPC menu diterima")
-                menu_received = True
-                break
-        
-        if not menu_received:
-            print("[-] NPC menu tidak diterima, mungkin belum di area NPC")
-            return False
-        
-        # 3. Kirim pilihan menu (op -61 NPC_INTERACT, menuId 0, index 0)
-        print(f"[>] Pilih NPC Menu 0 (Beli Umpan 500 Coin)")
-        ba = bytearray()
-        ba.extend(int(0).to_bytes(2, "big"))  # menuId 0 (Toko Pancing)
-        ba.extend(int(0).to_bytes(2, "big"))  # selected index 0 (Beli Umpan 500 Coin)
-        self._send(-61, bytes(ba))
-        self.outbound_log.append({'op': -61, 'hex': bytes(ba).hex(), 'ts': time.time()})
-        time.sleep(1.0)
-        
-        # 4. Tunggu respons op 86 BUY_BAIT
+        # Tunggu respons dari server
         success = False
         start_time = time.time()
         while time.time() - start_time < 3.0:
-            fr = self.sniffer.get(timeout=0.3)
+            fr = self.sniffer.get(timeout=0.5)
             if not fr: continue
             if fr.opcode == 86:
-                if len(fr.payload) > 0:
+                if len(fr.payload) >= 1:
                     res = fr.payload[0]
                     if res == 1:
                         print("[+] Sukses beli umpan (500 Coin)")
@@ -954,7 +925,6 @@ class AvatarBot:
                 else:
                     print("[?] BUY_BAIT tanpa payload")
                 break
-        
         return success
 
     def run_fish(self, cycles: int = 3, sniff_per_cycle: int = 10,
@@ -977,7 +947,7 @@ class AvatarBot:
         self._drain_responses(1.5)
         
         print("[fish] Membeli umpan...")
-        self.npc_buy_bait_coin()
+        self.buy_bait_direct()
         time.sleep(1.0)
         
         for i in range(cycles):
